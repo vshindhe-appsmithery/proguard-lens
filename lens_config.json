@@ -1,0 +1,5 @@
+{
+  "publicApis": ["com.razorpay.Checkout", "com.razorpay.CheckoutActivity", "com.razorpay.BaseCheckoutActivity"],
+  "alwaysKeep": ["com.razorpay.CheckoutBridge", "com.razorpay.CheckoutPresenter", "com.razorpay.RazorpayInitializer"],
+  "androidComponents": ["com.razorpay.RazorpayIntializer"]
+}

@@ -12,4 +12,11 @@ object Constants {
         "androidx/startup/Initializer"
     )
 
+    enum class KeepRules {
+        public_api,
+        keep_rule,
+        android_component,
+        default_android_component,
+    }
+
 }

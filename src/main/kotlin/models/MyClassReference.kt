@@ -7,6 +7,7 @@ package dev.appsmithery.models
       var extends: List<String>? = null
      var implements: List<String>? = null
      var methods: MutableMap<String,MyMethodReference>? = null
+     var getsCalledFrom = arrayListOf<String>()
 
  }
 

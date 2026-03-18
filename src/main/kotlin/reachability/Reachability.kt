@@ -17,10 +17,16 @@ class Reachability {
 
 
     private val allClasses = mutableMapOf<String, MyClassReference>()
-    private val reachedClasses = mutableListOf<String>()
+    private val reachedClasses = mutableMapOf<String, List<String>>() // the classes, and the classes that accessed this class.
+    private lateinit var lensConfig: LensConfig
+
+
 
     fun evaluateReachability(pathToAar : String, lensConfig: LensConfig): MutableMap<String, MyClassReference>{
-        //asm reachability graph testing
+        //store lensconfig in a global variable for usage
+        this.lensConfig = lensConfig
+        //ASM reachability graph testing
+
         val aarFile = ZipFile(File(pathToAar))
         val classesJarEntry = aarFile.getEntry("classes.jar")
         val classesJarBytes = aarFile.getInputStream(classesJarEntry).readBytes()
@@ -38,107 +44,117 @@ class Reachability {
             }
 
         classesJar.close()
-        println("====================")
-        allClasses.forEach { singleClass ->
-            println("class name : ${singleClass.key}")
-            println("extends class : ${singleClass.value.extends}")
-            println("implements class : ${singleClass.value.implements}")
-            singleClass.value.methods?.forEach { data ->
-//            println("method: ${data.methodName}")
 
-
-                println("method : ${data.key}")
-                data.value.calls.forEach {call ->
-                    println("calls -> $call")
-                }
-                data.value.accesses.forEach {access ->
-                    println("accesses -> $access")
-                }
-            }
-        }
-
-        println("====================")
-        allClasses.forEach { singleClass ->
-            println("class name : ${singleClass.key}")
-            println("extends class : ${singleClass.value.extends}")
-            println("implements class : ${singleClass.value.implements}")
-            singleClass.value.methods?.forEach { data ->
-//            println("method: ${data.methodName}")
-
-
-                println("method : ${data.key}")
-                data.value.calls.forEach {call ->
-                    println("calls -> $call")
-                }
-                data.value.accesses.forEach {access ->
-                    println("accesses -> $access")
-                }
-            }
-        }
-
-        println("====================")
-        println("==================== Traversing now ====================")
         val publicClasses = lensConfig.publicApis
         val alwaysKeep = lensConfig.alwaysKeep
         val androidComponents = lensConfig.androidComponents
-        reachedClasses.addAll(alwaysKeep)
-        reachedClasses.addAll(androidComponents)
 
-        publicClasses.forEach { className ->
-            isReachableTraversal(className, true)
+        publicClasses.forEach { publicClass ->
+            traverseThroughClass(withClassName = publicClass, isPublic = true, beingCalledFrom = null)
         }
-        allClasses.filter { it.key in reachedClasses ||
-                it.value.extends?.any { extends -> extends in Constants.defaultAndroidComponents } == true ||
-                it.value.implements?.any { implementations -> implementations in Constants.defaultAndroidComponents } == true }
-            .forEach { foundClasses ->
-            foundClasses.value.isReachable = true
+        alwaysKeep.forEach { publicClass ->
+            traverseThroughClass(withClassName = publicClass, isPublic = true, beingCalledFrom = null)
         }
-//        allClasses.values.filter { classRef ->
-//            classRef.extends?.any { it in Constants.defaultAndroidComponents } == true
-//        }
+        androidComponents.forEach { androidComponent ->
+            traverseThroughClass(withClassName = androidComponent, isPublic = true, beingCalledFrom = null)
+        }
 
         return allClasses
-
-//        val unreachable = allClasses.keys.filter { it !in reachedClasses }
-//        println("\n==== UNREACHABLE CLASSES ====")
-//        unreachable.forEach { println("❌ $it") }
     }
 
-    private fun isReachableTraversal(className: String, isPublic: Boolean) {
-        println("**********************")
-        println("Traversing $className.")
-        println("isPublic $isPublic")
-        if(!reachedClasses.contains(className)) {
-            reachedClasses.add(className)
-        }
-        val allCallClassList = mutableSetOf<String>()
-        allClasses[className]?.let { myClassReference ->
-            myClassReference.extends?.let { extends ->
-                allCallClassList.addAll(extends)
+    private fun traverseThroughClass(withClassName: String, isPublic: Boolean, beingCalledFrom: String?){
+        allClasses[withClassName]?.let { myClassReference ->
+            myClassReference.isPublic = isPublic
+            if(beingCalledFrom != null){
+                myClassReference.getsCalledFrom.add(beingCalledFrom)
             }
-            myClassReference.implements?.let { implements ->
-                allCallClassList.addAll(implements)
-            }
-            myClassReference.methods?.forEach { method ->
-                method.value.calls.forEach { call ->
-
-                    allCallClassList.add(call.key)
-
+            //doing it this way without the else because it's possible that this was called from somewhere but also was equipped in it's own way
+            when {
+                lensConfig.publicApis.contains(withClassName) -> {
+                    myClassReference.getsCalledFrom.add(Constants.KeepRules.public_api.name)
+                }
+                lensConfig.alwaysKeep.contains(withClassName) -> {
+                    myClassReference.getsCalledFrom.add(Constants.KeepRules.keep_rule.name)
+                }
+                lensConfig.androidComponents.contains(withClassName)  -> {
+                    myClassReference.getsCalledFrom.add(Constants.KeepRules.android_component.name)
+                }
+                myClassReference.extends?.any { extends -> extends in Constants.defaultAndroidComponents } == true -> {
+                    myClassReference.getsCalledFrom.add(Constants.KeepRules.default_android_component.name)
+                }
+                myClassReference.implements?.any { implements -> implements in Constants.defaultAndroidComponents } == true -> {
+                    myClassReference.getsCalledFrom.add(Constants.KeepRules.default_android_component.name)
                 }
             }
-        }
-        println("**********************")
+            myClassReference.isReachable = true
+            //all methods myClassReference calls, accesses, extends or implements
+            val allReferencesList = mutableSetOf<String>()
+            myClassReference.extends?.let { extends ->
+                allReferencesList.addAll(extends)
+            }
+            myClassReference.implements?.let { implements ->
+                allReferencesList.addAll(implements)
+            }
+            myClassReference.methods?.let { methods ->
+                methods.forEach { method ->
+                    method.value.isReachable = true
+                    method.value.calls.forEach { call ->
+                        allReferencesList.add(call.key)
+                    }
+                    method.value.accesses.forEach { access ->
+                        allReferencesList.add(access.key)
+                    }
+                }
+            }
 
-        allCallClassList.forEach { className ->
-            if (!reachedClasses.contains(className)){
-                println("Now traversing reached class $className")
-                isReachableTraversal(className, false)
+            allReferencesList.forEach { nextClassName ->
+                allClasses[nextClassName]?.let { myClassReference ->
+                    if(!myClassReference.isReachable){
+                        traverseThroughClass(nextClassName, isPublic = false, beingCalledFrom = withClassName)
+                    }
+                }
+
             }
 
         }
 
 
     }
+
+//    private fun isReachableTraversal(className: String, isPublic: Boolean, usedIn: String) {
+//        if(!reachedClasses.contains(className)) {
+//            reachedClasses.add(className)
+//        }
+//        // a list to store all the classes that were
+//        // extended, implemented, variable accessed, method triggered
+//        // that were found
+//        val allCallClassList = mutableSetOf<String>()
+//
+//        allClasses[className]?.let { myClassReference ->
+//            myClassReference.isPublic = isPublic
+//            myClassReference.extends?.let { extends ->
+//                allCallClassList.addAll(extends)
+//            }
+//            myClassReference.implements?.let { implements ->
+//                allCallClassList.addAll(implements)
+//            }
+//            myClassReference.methods?.forEach { method ->
+//                method.value.calls.forEach { call ->
+//
+//                    allCallClassList.add(call.key)
+//
+//                }
+//            }
+//        }
+//        allCallClassList.forEach { classNameToTraverse ->
+//            if (!reachedClasses.contains(classNameToTraverse)){
+//                isReachableTraversal(classNameToTraverse, false, className)
+//            }
+//
+//        }
+//
+//
+//    }
 
     private fun analyzeClass(classBytes: ByteArray): MyClassReference {
         val myClassReference = MyClassReference()
@@ -160,15 +176,11 @@ class Reachability {
             ) {
                 currentClass = name.replace("/", ".")
                 myClassReference.className = currentClass
-                println("\nClass: $currentClass")
                 superName?.let {
-
                     extendsList.add(it)
-                    println("  extends: ${it.replace("/", ".")}")
                 }
                 interfaces?.forEach {
                     implementsList.add(it)
-                    println("  implements: ${it.replace("/", ".")}")
                 }
             }
 
@@ -182,7 +194,6 @@ class Reachability {
                 val methodReference = MyMethodReference()
                 methodList["$name$descriptor"] = methodReference
                 methodReference.methodName = "$name$descriptor"
-                println("  Method: $name$descriptor")
                 return object : MethodVisitor(Opcodes.ASM9) {
                     override fun visitMethodInsn(
                         opcode: Int,
@@ -194,7 +205,6 @@ class Reachability {
                         val ownerClass = owner.replace("/", ".")
                         if (ownerClass.startsWith("com.razorpay")) {
                             methodReference.calls[ownerClass] = "$ownerClass.$name"
-                            println("    → calls $ownerClass.$name")
                         }
                     }
 
@@ -206,7 +216,6 @@ class Reachability {
                     ) {
                         val ownerClass = owner.replace("/", ".")
                         methodReference.accesses[ownerClass] = "$ownerClass.$name"
-                        println("    → accesses field ${owner.replace("/", ".")}.$name")
                     }
                 }
             }

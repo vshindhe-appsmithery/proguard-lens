@@ -42,6 +42,7 @@ class ReachabilityTraversal: CliktCommand(name = "reachability") {
         val reachability = Reachability()
         val lensConfig = loadConfig(lensConfigPath)
         val traversedGraph = reachability.evaluateReachability(aarPath, lensConfig)
+
 //        echo("Starting Lens : Reachability Graph with rules \n Public APIs: ${lensConfig.publicApis}\n Always Keep: ${lensConfig.alwaysKeep}")
         val reachable = traversedGraph.filter { it.value.isReachable }
         val unreachable = traversedGraph.filter { !it.value.isReachable }
@@ -53,7 +54,15 @@ class ReachabilityTraversal: CliktCommand(name = "reachability") {
         echo("─".repeat(50))
 
         echo("\n    ✅ Reachable (${reachable.size} classes)")
-        reachable.forEach { echo("   ${it.value.className}") }
+
+        reachable.forEach {
+
+            echo("   Name:${it.value.className}                               :  Is Public:${it.value.isPublic}  |  Called from:${it.value.getsCalledFrom}  |")
+            echo("methods: ${it.value.methods}")
+            echo("extends: ${it.value.extends}")
+            echo("implements: ${it.value.implements}")
+
+        }
 
         echo("\n    ❌ Unreachable (${unreachable.size} classes)")
         unreachable.forEach { echo("   ${it.value.className}") }
